@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useGestureRecognition } from '@/hooks/useGestureRecognition'
 import GreetingItem from './carousel-items/greeting-item'
-import WeatherCalendarItem from './carousel-items/weather-calendar-item'
+import WidgetItem from './carousel-items/widget-item'
 import MusicItem from './carousel-items/music-item'
 import Cursor from './cursor'
 
@@ -104,7 +104,7 @@ function Dashboard() {
 				}}
 			>
 				<GreetingItem />
-				<WeatherCalendarItem />
+				<WidgetItem />
 				<MusicItem />
 			</div>
 

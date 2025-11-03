@@ -28,8 +28,67 @@ function Cursor({ temporalGesture }: CursorProps) {
 	const SNAP_THRESHOLD = 75 // Distance in pixels to snap to an element
 	const SNAP_TO_DIFFERENT_THRESHOLD = 20 // Distance in pixels to snap to a different element when already snapped (much more restrictive)
 	const SNAP_DIFFERENCE_RATIO = 0.1 // New element must be at least 40% closer than current to switch
-	const HIDE_AT_CENTER_THRESHOLD = 10 // Distance in pixels to consider cursor "at center" and hide it
 	const HIDE_AFTER_NO_POINTING_MS = 2000 // Hide cursor after 2 seconds of no Pointing_Up gesture
+
+	// Helper function to find the open dialog element
+	const getOpenDialog = (): Element | null => {
+		// Check for Radix UI dialog with data-state="open"
+		const dialogContent = document.querySelector(
+			'[data-slot="dialog-content"][data-state="open"]'
+		)
+		if (dialogContent) {
+			return dialogContent
+		}
+		// Fallback: check for any element with data-state="open" that looks like a dialog
+		const openDialogs = document.querySelectorAll('[data-state="open"]')
+		for (const dialog of openDialogs) {
+			// Check if it has dialog-related attributes
+			if (
+				dialog.hasAttribute('data-slot') &&
+				(dialog.getAttribute('data-slot')?.includes('dialog') ||
+					dialog.classList.contains('dialog') ||
+					dialog.querySelector('[data-slot="dialog-content"]'))
+			) {
+				return dialog
+			}
+		}
+		return null
+	}
+
+	// Helper function to check if an element is a descendant of the dialog
+	const isElementInDialog = (element: Element, dialog: Element): boolean => {
+		let current: Element | null = element
+		while (current) {
+			if (current === dialog) {
+				return true
+			}
+			current = current.parentElement
+		}
+		return false
+	}
+
+	// Helper function to calculate distance between a circle (cursor) and a rectangle (element)
+	const distanceBetweenCircleAndRect = (
+		cx: number,
+		cy: number,
+		rect: DOMRect
+	): { distance: number; closestPoint: { x: number; y: number } } => {
+		const x1 = rect.left // top-left x
+		const y1 = rect.top // top-left y
+		const x2 = rect.left + rect.width // bottom-right x
+		const y2 = rect.top + rect.height // bottom-right y
+
+		// Clamp circle center to rectangle boundaries
+		const closestX = Math.max(x1, Math.min(cx, x2))
+		const closestY = Math.max(y1, Math.min(cy, y2))
+
+		// Distance from circle center to that closest point
+		const dx = cx - closestX
+		const dy = cy - closestY
+		const distance = Math.sqrt(dx * dx + dy * dy)
+
+		return { distance, closestPoint: { x: closestX, y: closestY } }
+	}
 
 	// Update target position from gesture data
 	// Use a ref to track the latest gesture without causing re-renders
@@ -79,11 +138,21 @@ function Cursor({ temporalGesture }: CursorProps) {
 					cursorElement.style.display = 'none'
 				}
 
+				// Check if a dialog is open
+				const openDialog = getOpenDialog()
+
 				// Find element under cursor
 				let element: Element | null = null
 				if (document.elementsFromPoint) {
 					const elements = document.elementsFromPoint(x, y)
-					const filteredElements = elements.filter((el) => el !== cursorElement)
+					let filteredElements = elements.filter((el) => el !== cursorElement)
+
+					// If a dialog is open, only consider elements inside the dialog
+					if (openDialog) {
+						filteredElements = filteredElements.filter((el) =>
+							isElementInDialog(el, openDialog)
+						)
+					}
 
 					// First, try to find an element with "interactive" class
 					const interactiveClassElements = filteredElements.filter((el) =>
@@ -104,6 +173,7 @@ function Cursor({ temporalGesture }: CursorProps) {
 					if (
 						foundElement &&
 						foundElement !== cursorElement &&
+						!(openDialog && !isElementInDialog(foundElement, openDialog)) &&
 						(foundElement.classList.contains('interactive') ||
 							isInteractiveElement(foundElement))
 					) {
@@ -243,16 +313,25 @@ function Cursor({ temporalGesture }: CursorProps) {
 			// Get cursor element once at the start
 			const cursorElement = cursorElementRef.current
 
+			// Check if a dialog is open
+			const openDialog = getOpenDialog()
+
 			// Find all interactive elements
-			const interactiveElements = Array.from(
-				document.querySelectorAll('.interactive')
-			).filter((el) => el !== cursorElement)
+			let interactiveElements = Array.from(document.querySelectorAll('.interactive')).filter(
+				(el) => el !== cursorElement
+			)
+
+			// If a dialog is open, only consider elements inside the dialog
+			if (openDialog) {
+				interactiveElements = interactiveElements.filter((el) =>
+					isElementInDialog(el, openDialog)
+				)
+			}
 
 			// Smart snapping with lerping: find closest interactive element and snap to its center
 			// Use hysteresis when already snapped to prevent jittery switching between elements
 			let snappedTarget = target
 			let isSnapping = false
-			let snappedCenter: { x: number; y: number } | null = null
 
 			if (interactiveElements.length > 0) {
 				const currentlySnapped = currentlySnappedElementRef.current
@@ -279,13 +358,12 @@ function Cursor({ temporalGesture }: CursorProps) {
 						continue
 					}
 
+					// Calculate distance from cursor to element's bounding box (not just center)
+					const { distance } = distanceBetweenCircleAndRect(target.x, target.y, rect)
+
+					// Calculate element center for snapping target
 					const centerX = rect.left + rect.width / 2
 					const centerY = rect.top + rect.height / 2
-
-					// Calculate distance from target position to element center
-					const dx = target.x - centerX
-					const dy = target.y - centerY
-					const distance = Math.sqrt(dx * dx + dy * dy)
 
 					// Determine which threshold to use based on whether we're already snapped
 					let threshold = SNAP_THRESHOLD
@@ -302,14 +380,12 @@ function Cursor({ temporalGesture }: CursorProps) {
 							// Different element: require much closer distance and be significantly closer
 							threshold = SNAP_TO_DIFFERENT_THRESHOLD
 
-							// Calculate distance to currently snapped element for comparison
+							// Calculate distance to currently snapped element's bounding box for comparison
 							const currentRect = currentlySnapped.getBoundingClientRect()
-							const currentCenterX = currentRect.left + currentRect.width / 2
-							const currentCenterY = currentRect.top + currentRect.height / 2
-							const dxCurrent = target.x - currentCenterX
-							const dyCurrent = target.y - currentCenterY
-							const distanceToCurrent = Math.sqrt(
-								dxCurrent * dxCurrent + dyCurrent * dyCurrent
+							const { distance: distanceToCurrent } = distanceBetweenCircleAndRect(
+								target.x,
+								target.y,
+								currentRect
 							)
 
 							// New element must be within threshold AND be significantly closer than current
@@ -329,7 +405,7 @@ function Cursor({ temporalGesture }: CursorProps) {
 					// If within threshold and effectively closer than previous closest
 					if (distance <= threshold && effectiveDistance < closestDistance) {
 						closestDistance = effectiveDistance
-						closestCenter = { x: centerX, y: centerY }
+						closestCenter = { x: centerX, y: centerY } // Snap to center even though we calculated distance to bounding box
 						closestElement = el
 					}
 				}
@@ -337,7 +413,6 @@ function Cursor({ temporalGesture }: CursorProps) {
 				// If we found a close element, snap to its center
 				if (closestCenter && closestElement) {
 					snappedTarget = closestCenter
-					snappedCenter = closestCenter
 					isSnapping = true
 					currentlySnappedElementRef.current = closestElement
 				} else {
@@ -367,31 +442,54 @@ function Cursor({ temporalGesture }: CursorProps) {
 				return newPos
 			})
 
-			// Hide cursor when it's at the center of an interactive element
+			// Hide cursor immediately when snapping is detected
+			// Only unhide when snapping has completely stopped (no element within threshold)
 			// Only do this if cursor should be visible (not hidden due to no hand/no pointing)
-			const currentPos = currentPositionRef.current
-			if (isVisibleRef.current && currentPos && cursorElement && snappedCenter) {
-				// Check if cursor is very close to the snapped element's center
-				const dx = currentPos.x - snappedCenter.x
-				const dy = currentPos.y - snappedCenter.y
-				const distanceToCenter = Math.sqrt(dx * dx + dy * dy)
-
-				if (distanceToCenter <= HIDE_AT_CENTER_THRESHOLD) {
-					// Cursor is at center, hide it
+			if (isVisibleRef.current && cursorElement) {
+				if (isSnapping) {
+					// Cursor is snapping to an element, hide it immediately
 					cursorElement.style.opacity = '0'
 				} else {
-					// Cursor moved away from center, show it
-					cursorElement.style.opacity = '1'
+					// Not snapping - check if we're definitely outside all interactive elements
+					// Only show cursor if we're outside the snap threshold of all elements
+					const currentPos = currentPositionRef.current
+					if (currentPos) {
+						let isNearAnyElement = false
+
+						// Check if cursor is within snap threshold of any interactive element
+						for (const el of interactiveElements) {
+							const rect = el.getBoundingClientRect()
+							if (rect.width === 0 || rect.height === 0) continue
+
+							const { distance } = distanceBetweenCircleAndRect(
+								currentPos.x,
+								currentPos.y,
+								rect
+							)
+
+							// If within threshold, we're still near an element
+							if (distance <= SNAP_THRESHOLD) {
+								isNearAnyElement = true
+								break
+							}
+						}
+
+						// Only show cursor if we're definitely outside all elements
+						if (!isNearAnyElement) {
+							cursorElement.style.opacity = '1'
+						}
+					} else {
+						// No position, show cursor
+						cursorElement.style.opacity = '1'
+					}
 				}
-			} else if (isVisibleRef.current && cursorElement) {
-				// No snapping target, ensure cursor is visible (only if it should be visible)
-				cursorElement.style.opacity = '1'
 			}
 
 			// Click detection: find element under cursor and handle clicks
-			if (currentPos) {
-				const x = Math.round(currentPos.x)
-				const y = Math.round(currentPos.y)
+			const currentPosForClick = currentPositionRef.current
+			if (currentPosForClick) {
+				const x = Math.round(currentPosForClick.x)
+				const y = Math.round(currentPosForClick.y)
 
 				// Temporarily hide cursor to find element underneath
 				if (cursorElement) {
@@ -434,11 +532,21 @@ function Cursor({ temporalGesture }: CursorProps) {
 					return isStandardInteractive
 				}
 
+				// Check if a dialog is open
+				const openDialog = getOpenDialog()
+
 				// Find element under cursor - prioritize elements with "interactive" class
 				if (document.elementsFromPoint) {
 					// Use elementsFromPoint to get all elements at point, then filter out cursor
 					const elements = document.elementsFromPoint(x, y)
-					const filteredElements = elements.filter((el) => el !== cursorElement)
+					let filteredElements = elements.filter((el) => el !== cursorElement)
+
+					// If a dialog is open, only consider elements inside the dialog
+					if (openDialog) {
+						filteredElements = filteredElements.filter((el) =>
+							isElementInDialog(el, openDialog)
+						)
+					}
 
 					// First, try to find an element with "interactive" class
 					const interactiveClassElements = filteredElements.filter((el) =>
@@ -460,6 +568,13 @@ function Cursor({ temporalGesture }: CursorProps) {
 					// Fallback to elementFromPoint
 					const foundElement = document.elementFromPoint(x, y)
 					if (foundElement === cursorElement) {
+						element = null
+					} else if (
+						foundElement &&
+						openDialog &&
+						!isElementInDialog(foundElement, openDialog)
+					) {
+						// If dialog is open and element is not inside dialog, ignore it
 						element = null
 					} else if (foundElement?.classList.contains('interactive')) {
 						element = foundElement
@@ -505,8 +620,8 @@ function Cursor({ temporalGesture }: CursorProps) {
 						// Throttle clicks to avoid spam (min 200ms between clicks)
 						if (now - lastClickTimeRef.current > 200) {
 							// Dispatch full click sequence with coordinates
-							const clickX = Math.round(currentPos.x)
-							const clickY = Math.round(currentPos.y)
+							const clickX = Math.round(currentPosForClick.x)
+							const clickY = Math.round(currentPosForClick.y)
 							pendingClickElement.dispatchEvent(
 								new MouseEvent('mousedown', {
 									bubbles: true,
@@ -588,7 +703,7 @@ function Cursor({ temporalGesture }: CursorProps) {
 		<>
 			<div
 				ref={cursorElementRef}
-				className="fixed pointer-events-none z-50"
+				className="fixed pointer-events-none z-[110]"
 				style={{
 					left: `${position.x}px`,
 					top: `${position.y}px`,

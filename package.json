@@ -5,23 +5,31 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"server": "node server.js",
 		"build": "tsc -b && vite build",
 		"lint": "eslint .",
 		"preview": "vite preview"
 	},
 	"dependencies": {
 		"@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
+		"@radix-ui/react-dialog": "^1.1.15",
+		"@radix-ui/react-separator": "^1.1.7",
 		"@radix-ui/react-slot": "^1.2.3",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
+		"cors": "^2.8.5",
 		"date-fns": "^4.1.0",
+		"dotenv": "^17.2.3",
 		"embla-carousel-react": "^8.6.0",
+		"express": "^5.1.0",
+		"ical.js": "^2.2.1",
 		"lucide-react": "^0.552.0",
 		"react": "^19.1.1",
 		"react-day-picker": "^9.11.1",
 		"react-dom": "^19.1.1",
 		"tailwind-merge": "^3.3.1",
-		"tailwindcss": "^4.1.16"
+		"tailwindcss": "^4.1.16",
+		"tsdav": "^2.1.6"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.36.0",
