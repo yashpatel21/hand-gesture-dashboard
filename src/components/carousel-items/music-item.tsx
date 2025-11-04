@@ -168,6 +168,8 @@ function MusicItem() {
 	const localProgressRef = useRef(0)
 	const lastUpdateTimeRef = useRef(Date.now())
 	const isInitializedRef = useRef(false)
+	const isPlayingRef = useRef(false) // Ref to track playing state for interval checks
+	const pendingActionRef = useRef<{ action: 'play' | 'pause'; timestamp: number } | null>(null) // Track pending user actions
 
 	// Format time in MM:SS format
 	const formatTime = (ms: number): string => {
@@ -179,20 +181,60 @@ function MusicItem() {
 
 	// Update UI from playback state info
 	const updatePlaybackState = useCallback((stateInfo: PlaybackStateInfo) => {
-		setIsPlaying(stateInfo.isPlaying)
+		// Always update state from Spotify API to ensure UI matches actual playback state
+		const wasPlaying = isPlayingRef.current
+		const newIsPlaying = stateInfo.isPlaying ?? false
+
+		// Check if there's a pending user action that might not be reflected yet
+		const now = Date.now()
+		const pendingAction = pendingActionRef.current
+		const pendingActionAge = pendingAction ? now - pendingAction.timestamp : Infinity
+
+		// If a user action happened recently (within 2 seconds), check if Spotify has confirmed it
+		let shouldUpdateIsPlaying = true
+		if (pendingAction && pendingActionAge < 2000) {
+			const expectedState = pendingAction.action === 'play'
+			// If Spotify's state matches what we expect from our action, clear the pending action
+			if (newIsPlaying === expectedState) {
+				pendingActionRef.current = null
+				// Spotify confirmed our action - update state normally
+				shouldUpdateIsPlaying = true
+			} else {
+				// Spotify hasn't confirmed our action yet - keep our optimistic state
+				// Don't update isPlaying from Spotify until it confirms or timeout expires
+				shouldUpdateIsPlaying = false
+			}
+		}
+
+		// Update other state regardless of pending action
 		setHasActivePlayback(stateInfo.hasActivePlayback)
 		setActiveDeviceName(stateInfo.activeDeviceName)
 		setTrackInfo(stateInfo.trackInfo)
 		setContextUri(stateInfo.contextUri)
 		setContextInfo(stateInfo.contextInfo)
 
+		// Only update isPlaying if we should (not during pending action period)
+		if (shouldUpdateIsPlaying) {
+			isPlayingRef.current = newIsPlaying
+			setIsPlaying(newIsPlaying)
+		}
+
 		if (stateInfo.hasActivePlayback && stateInfo.trackInfo) {
-			setProgress(stateInfo.progress)
-			localProgressRef.current = stateInfo.progress
+			// Update progress from Spotify API - always use actual Spotify progress
+			const spotifyProgress = stateInfo.progress ?? 0
+			setProgress(spotifyProgress)
+			localProgressRef.current = spotifyProgress
 			lastUpdateTimeRef.current = Date.now()
+
+			// If playback state changed from playing to paused, stop progress updates
+			if (wasPlaying && !newIsPlaying) {
+				// Just paused - ensure progress is frozen at current position
+				localProgressRef.current = spotifyProgress
+			}
 		} else {
 			setProgress(0)
 			localProgressRef.current = 0
+			isPlayingRef.current = false
 		}
 	}, [])
 
@@ -223,11 +265,20 @@ function MusicItem() {
 		}
 	}, [])
 
-	// Update progress locally between polls
+	// Update progress locally between polls - only when actually playing
 	useEffect(() => {
-		if (!isPlaying || !trackInfo) return
+		// Only update progress if we're actually playing AND have track info
+		if (!isPlaying || !trackInfo || !hasActivePlayback) {
+			return
+		}
 
 		const interval = setInterval(() => {
+			// Use ref to check current playing state (avoids closure issues)
+			// This prevents progress from continuing after pause
+			if (!isPlayingRef.current) {
+				return
+			}
+
 			const now = Date.now()
 			const elapsed = now - lastUpdateTimeRef.current
 			const newProgress = Math.min(localProgressRef.current + elapsed, trackInfo.duration)
@@ -242,7 +293,7 @@ function MusicItem() {
 		}, 100) // Update every 100ms for smooth progress bar
 
 		return () => clearInterval(interval)
-	}, [isPlaying, trackInfo, pollPlaybackState])
+	}, [isPlaying, trackInfo, hasActivePlayback, pollPlaybackState])
 
 	// Initialize playback on authentication and start continuous polling
 	useEffect(() => {
@@ -338,25 +389,49 @@ function MusicItem() {
 	}
 
 	const handlePlayPause = async () => {
-		if (isPlaying) {
-			await spotifyService.pausePlayback()
-			setIsPlaying(false)
-			stopPolling()
-		} else {
-			// If there's active playback (just paused), resume without contextUri
-			// Only pass contextUri if there's no active playback (new session)
-			if (hasActivePlayback) {
-				await spotifyService.startPlayback()
+		try {
+			if (isPlaying) {
+				// Pause playback
+				await spotifyService.pausePlayback()
+				// Mark that we have a pending pause action
+				pendingActionRef.current = { action: 'pause', timestamp: Date.now() }
+				// Update ref immediately to stop progress updates
+				isPlayingRef.current = false
+				// Optimistically update UI
+				setIsPlaying(false)
+				// Stop local progress updates immediately - freeze at current position
+				localProgressRef.current = progress
+				// Poll after a delay to get actual state from Spotify (verifies pause worked)
+				// But use a longer delay to give Spotify time to process the action
+				setTimeout(() => {
+					pollPlaybackState()
+				}, 800)
 			} else {
-				await spotifyService.startPlayback(contextUri || undefined)
+				// Resume playback
+				// If there's active playback (just paused), resume without contextUri
+				// Only pass contextUri if there's no active playback (new session)
+				if (hasActivePlayback) {
+					await spotifyService.startPlayback()
+				} else {
+					await spotifyService.startPlayback(contextUri || undefined)
+				}
+				// Mark that we have a pending play action
+				pendingActionRef.current = { action: 'play', timestamp: Date.now() }
+				// Update ref immediately to start progress updates
+				isPlayingRef.current = true
+				// Optimistically update UI
+				setIsPlaying(true)
+				lastUpdateTimeRef.current = Date.now()
+				// Poll after a delay to get updated state (verifies play worked)
+				// But use a longer delay to give Spotify time to process the action
+				setTimeout(() => {
+					pollPlaybackState()
+				}, 800)
 			}
-			setIsPlaying(true)
-			lastUpdateTimeRef.current = Date.now()
-			// Poll immediately to get updated state
-			setTimeout(() => {
-				pollPlaybackState()
-				startPolling()
-			}, 500)
+		} catch {
+			// If the API call fails, clear pending action and poll to get the actual state
+			pendingActionRef.current = null
+			pollPlaybackState()
 		}
 	}
 
