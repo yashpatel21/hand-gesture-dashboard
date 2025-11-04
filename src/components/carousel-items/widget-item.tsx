@@ -219,7 +219,6 @@ function TodayWidget() {
 				setEventsByCalendar(events)
 			} catch (err) {
 				setError(err instanceof Error ? err.message : "Error fetching today's events")
-				console.error("Error fetching today's events:", err)
 			} finally {
 				setLoading(false)
 			}

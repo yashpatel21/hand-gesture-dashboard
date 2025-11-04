@@ -2,7 +2,7 @@ import type { DAVCalendar, DAVCalendarObject } from 'tsdav'
 import ICAL from 'ical.js'
 import { endOfDay, isSameDay, parseISO } from 'date-fns'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const API_BASE_URL = import.meta.env.VITE_API_URL
 
 export interface CalendarEvent {
 	dtstart: string
@@ -200,28 +200,16 @@ class ICloudService {
 				let iterations = 0
 				const maxIterations = 1000
 
-				console.log(`Checking recurring event for ${targetDate.toLocaleDateString()}`)
-				console.log(`Event start: ${dtstart.toLocaleDateString()}, RRULE: ${rrule}`)
-
 				while (occurrence && iterations < maxIterations) {
 					const occurrenceDate = occurrence.toJSDate()
-					console.log(
-						`  Checking occurrence ${
-							iterations + 1
-						}: ${occurrenceDate.toLocaleDateString()} ${occurrenceDate.toLocaleTimeString()}`
-					)
 
 					// Check if occurrence is on the same day as target date
 					if (isSameDay(occurrenceDate, targetDate)) {
-						console.log(`  ✓ Match found!`)
 						return true
 					}
 
 					// If we've passed the target date, stop
 					if (occurrenceDate > targetEnd) {
-						console.log(
-							`  Stopping: occurrence ${occurrenceDate.toLocaleDateString()} is after target ${targetDate.toLocaleDateString()}`
-						)
 						break
 					}
 
@@ -229,7 +217,6 @@ class ICloudService {
 					iterations++
 				}
 
-				console.log(`  No match found after ${iterations} iterations`)
 				return false
 			} else {
 				// Single event - check if it's on the target date
@@ -251,36 +238,22 @@ class ICloudService {
 
 		try {
 			const calendars = await this.fetchCalendars()
-			console.log(`Fetching events for ${targetDate.toLocaleDateString()}`)
-			console.log(`Found ${calendars.length} calendars`)
 
 			for (const calendar of calendars) {
 				try {
 					const calendarObjects = await this.fetchCalendarObjects(calendar)
-					console.log(
-						`Calendar "${calendar.displayName}": ${calendarObjects.length} objects`
-					)
 
 					const calendarEvents: CalendarEvent[] = []
 
 					for (const obj of calendarObjects) {
 						if (!obj.data) {
-							console.log('  Skipping object: no data')
 							continue
 						}
 
 						// Ensure data is a string
 						if (typeof obj.data !== 'string') {
-							console.log(
-								`  Skipping object: data is not a string (type: ${typeof obj.data})`
-							)
 							continue
 						}
-
-						// Log first few characters of data to see what we're working with
-						console.log(
-							`  Object data preview (first 200 chars): ${obj.data.substring(0, 200)}`
-						)
 
 						const calendarId = calendar.url || `calendar-${calendars.indexOf(calendar)}`
 						const calendarName =
@@ -299,18 +272,10 @@ class ICloudService {
 						)
 
 						if (!eventData) {
-							console.log('  Skipping object: failed to parse')
 							continue
 						}
 
 						const dtstart = parseISO(eventData.dtstart)
-						console.log(
-							`  Event: "${
-								eventData.summary
-							}" - Start: ${dtstart.toLocaleDateString()} - RRULE: ${
-								eventData.rrule || 'none'
-							}`
-						)
 
 						// Check if event occurs on target date
 						const occursOnDate = this.eventOccursOnDate(
@@ -318,9 +283,6 @@ class ICloudService {
 							eventData.rrule,
 							targetDate,
 							obj.data
-						)
-						console.log(
-							`    Occurs on ${targetDate.toLocaleDateString()}: ${occursOnDate}`
 						)
 
 						if (occursOnDate) {
@@ -372,10 +334,6 @@ class ICloudService {
 			}
 		}
 
-		console.log(
-			`Total events found: ${result.reduce((sum, cal) => sum + cal.events.length, 0)}`
-		)
-		console.log(`Calendars with events: ${result.length}`)
 		return result
 	}
 

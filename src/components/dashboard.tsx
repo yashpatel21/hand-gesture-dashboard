@@ -52,10 +52,6 @@ function Dashboard() {
 	useEffect(() => {
 		if (!temporalGesture) return
 
-		if (temporalGesture.gesture === 'click') {
-			console.log('dash click detected!')
-		}
-
 		if (temporalGesture.gesture === 'swipe_left') {
 			// Swipe left = next item (increment)
 			setCurrentIndex((prevIndex) => {

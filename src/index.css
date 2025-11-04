@@ -146,3 +146,32 @@
 	outline: 2px solid white;
 	outline-offset: 2px;
 }
+
+/* Scrolling text animation - bounce back and forth */
+.scrolling-text-wrapper {
+	overflow: hidden;
+	position: relative;
+	width: 100%;
+}
+
+.scrolling-text {
+	display: inline-block;
+	white-space: nowrap;
+}
+
+.scrolling-text:hover {
+	animation-play-state: paused;
+}
+
+/* Dynamic scroll animation - will be overridden by inline style */
+@keyframes scroll-text-default {
+	0% {
+		transform: translateX(0);
+	}
+	50% {
+		transform: translateX(calc(-1 * var(--scroll-distance)));
+	}
+	100% {
+		transform: translateX(0);
+	}
+}
