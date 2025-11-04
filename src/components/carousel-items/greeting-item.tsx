@@ -17,11 +17,32 @@ function GreetingItem() {
 		hour12: true,
 	})
 
+	const formattedDate = currentTime.toLocaleDateString('en-US', {
+		weekday: 'long',
+		month: 'long',
+		day: 'numeric',
+		year: 'numeric',
+	})
+
+	const getGreeting = () => {
+		const hour = currentTime.getHours()
+		if (hour >= 5 && hour < 12) {
+			return 'Good morning'
+		} else if (hour >= 12 && hour < 17) {
+			return 'Good afternoon'
+		} else if (hour >= 17 && hour < 21) {
+			return 'Good evening'
+		} else {
+			return 'Good night'
+		}
+	}
+
 	return (
 		<div className="w-full h-full shrink-0 flex items-center justify-center p-8">
-			<div className="flex flex-col items-center gap-4">
-				<div className="text-6xl font-bold">Good evening, Yash.</div>
-				<div className="text-4xl font-medium text-muted-foreground">{formattedTime}</div>
+			<div className="flex flex-col items-center gap-6">
+				<div className="text-8xl font-bold tracking-tight">{formattedTime}</div>
+				<div className="text-5xl font-semibold">{getGreeting()}, Yash.</div>
+				<div className="text-3xl font-medium text-muted-foreground">{formattedDate}</div>
 			</div>
 		</div>
 	)
